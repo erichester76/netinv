@@ -226,14 +226,7 @@ if (mdns){
         if ($1 =~ /macbook/i or /macmini/i or /macpro/i or /imac/i){
           $devices{$current_device}{'manufacturer'}='Apple, Inc.';
           $devices{$current_device}{'os'}='OSX';
-        }
-        if ($1 =~ /ipad/i or /iphone/i){
-          $devices{$current_device}{'manufacturer'}='Apple, Inc.';
-          $devices{$current_device}{'os'}='IOS';
-        }
-        if ($1 =~ /applewatch/i){
-          $devices{$current_device}{'manufacturer'}='Apple, Inc.';
-          $devices{$current_device}{'os'}='watchOS';
+          $devices{$current_devices}{'is_workstation'}=1;
         }
       }
     }
@@ -248,14 +241,11 @@ if (mdns){
       }
     }
     if ($line =~ /\|\_*\ +type\=printer$/i){
-      if (!$devices{$current_device}{'is_printer'}){
-        $devices{$current_device}{'is_printer'}=1;
-      }
+      $devices{$current_device}{'is_printer'}=1;
+      $devices{$current_device}{'is_iot'}=1;
     }
     if ($line =~ /\|\_*\ +445\/tcp smb$/i){
-      if (!$devices{$current_device}{'is_fileserver'}){
-        $devices{$current_device}{'is_filserver'}=1;
-      }
+      $devices{$current_device}{'is_fileserver'}=1;
     }
   }
   close(NMAP);
@@ -283,6 +273,43 @@ foreach my $device (keys %devices){
       sleep 2;
     }
   }
+
+  if ($devices{$device}{'hostname'} =~ /^hub/ and $devices{$device}{'manufacturer'} =~ /SAMJIN/){
+    ($devices{$device}{'model'}) = $devices{$device}{'hostname'} =~ m/^(hub.*)\-/;
+    $devices{$device}{'manufacturer'} = 'Samsung';
+    $devices{$device}{'is_iot'} = 1;
+    $devices{$device}{'is_hub'} = 1;
+  }
+  if ($devices{$device}{'hostname'} =~ /^dp\-/i and $devices{$device}{'manufacturer'} =~ /amazon/i){
+    $devices{$device}{'manufacturer'} = 'Amazon';
+    ($devices{$device}{'model'}) = 'Amazon Echo';
+    $devices{$device}{'is_iot'} = 1;
+    $devices{$device}{'is_assistant'} = 1;
+  }
+  if ($devices{$device}{'hostname'} =~ /^(Ring.*)\-/ and $devices{$device}{'manufacturer'} =~ /Universal Global Scientific Industrial/){
+    $devices{$device}{'manufacturer'} = 'Ring';
+    ($devices{$device}{'model'}) = $devices{$device}{'hostname'} =~ m/^(Ring.*)\-/;
+    $devices{$device}{'is_iot'} = 1;
+  }
+  if ($devices{$device}{'manufacturer'} =~ /roku/i){
+    $devices{$device}{'is_iot'}=1;
+    $devices{$device}{'is_tv'}=1;
+  }
+  if ($devices{$device}{'manufacturer'} =~ /apple/i){
+    if ($devices{$device}{'hostname'} =~ /ipad/i or $devices{$device}{'hostname'} =~ /iphone/i){
+      $devices{$device}{'name'}=$devices{$device}{'hostname'};
+      $devices{$device}{'model'}=$devices{$device}{'hostname'} =~ m/(ipad|iphone)/i;
+      $devices{$device}{'os'}='IOS';
+      $devices{$device}{'is_mobile'}=1;
+    }
+    if ($devices{$device}{'hostname'} =~ /applewatch/i){
+      $devices{$device}{'name'}=$devices{$device}{'hostname'};
+      $devices{$device}{'os'}='watchOS';
+      $devices{$device}{'model'}='Apple Watch';
+      $devices{$device}{'is_mobile'}=1;
+    }
+  }
+
   foreach my $attrib (keys %{$devices{$device}}){
     print "$device : $attrib = $devices{$device}{$attrib}\n" if $debug;
   }
