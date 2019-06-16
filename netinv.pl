@@ -11,29 +11,57 @@
 #
 # 2019-06-12 - First Version - Eric Hester
 #
-#
+# todo:
+# netbios-ns
+# snmp
+# dropbox
+# wsdd
+# dump to sqlite
 
+#
+#key for macvendors.com API
+$macvendors_api_key="eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJtYWN2ZW5kb3JzIiwiZXhwIjoxODc1MjAyMDAyLCJpYXQiOjE1NjA3MDYwMDIsImlzcyI6Im1hY3ZlbmRvcnMiLCJqdGkiOiJmOTYwNjk1ZS05YjBjLTQ5OTgtYmQ2Ni1mYmVlMGIyYjM4YmIiLCJuYmYiOjE1NjA3MDYwMDEsInN1YiI6IjE1NjgiLCJ0eXAiOiJhY2Nlc3MifQ.gaJmI0_CVqa8Y20nbmQLGZZUSAvnWAyo9oASGNR9ngDvzCzbU-BOxJkGzAOfOm2AUoHN8y_N4KXsdw13TZab1w";
+
+#local of critical binaries 
+$bin_arping="/usr/local/sbin/arping";
+$bin_nmap="/usr/local/bin/nmap";
+$bin_curl="/usr/bin/curl";
+
+#set interface to wired interface you wish to scan
+#linux default
 #$interface = eth0
-$interface = en0;
+#osx usb ethernet
+$interface = en7;
 #
 #print progress
 $debug = 1;
+#
 #arping entire subnet enable
-$arping = 0;
+$arping = 1;
+#
 #upnp multicast lookup enable
 $upnp = 1;
+#
 #mdns multicast lookup enable
 $mdns = 1;
+#
 #netbios lookup enable
 $netbios = 1;
+#
 #dropbox lookup enable
 $dropbox = 1;
+#
 #wsdd lookup enable
 $wsdd = 1;
+#
 #macvendors.com mac address lookup enable
 $maclookup = 1;
-#router dns reverse dns lookup enable
+#
+#router reverse dns lookup enable
 $routerptr = 1;
+#
+#dns reverse dns lookup enable
+$dnsptr = 1;
 
 ## get network info by sending a DHCP DISCOVER and parse the OFFER
 #
@@ -52,7 +80,7 @@ $routerptr = 1;
 #|_  Router: 192.168.1.1
 
 print "Getting DHCP Info..." if $debug;
-open(NMAP,"nmap --script=broadcast-dhcp-discover -e $interface 2>/dev/null|");
+open(NMAP,"$bin_nmap --script=broadcast-dhcp-discover -e $interface 2>/dev/null|");
 
 while (chomp(my $line = <NMAP>)){
   if ($line =~ /\|\_*\ +Server Identifier\: (.+)$/){
@@ -67,22 +95,24 @@ while (chomp(my $line = <NMAP>)){
   }
   if ($line =~ /\|\_*\ +Subnet Mask\: (.+)$/){
     our $netmask = $1;
+    
     # convert IP addresses to unsigned long integers
     my @addrb=split("[.]",$my_ip);
     my ( $addrval ) = unpack( "N", pack( "C4",@addrb ) );
     my @maskb=split("[.]",$netmask);
     my ( $maskval ) = unpack( "N", pack( "C4",@maskb ) );
 
-    # calculate network address
+    # calculate network and broadcast address
     my $netwval = ( $addrval & $maskval );
+    my $broadval = ( $addrval | ~$maskval );
 
     # convert network address to IP address
     my @netwb=unpack( "C4", pack( "N",$netwval ) );
     our $network=join(".",@netwb);
+    # convert broadcast address to IP address
+    my @broadb=unpack( "C4", pack( "N",$broadval ) );
+    our $broadcast=join(".",@broadb);
 
-  }
-  if ($line =~ /\|\_*\ +Broadcast Address\: (.+)$/){
-    our $broadcast = $1;
   }
   if ($line =~ /\|\_*\ +Domain Name\: (.+)$/){
     our $domain_name = $1;
@@ -96,6 +126,10 @@ while (chomp(my $line = <NMAP>)){
 close(NMAP);
 
 print "Done\n" if $debug;
+print "Network = $network / $netmask / $broadcast\n" if $debug;
+print "Domain Name = $domain_name\n" if $debug;
+print "DNS = $dns_servers\n" if $debug;
+
 
 ## ARP discovery
 #
@@ -108,29 +142,33 @@ if ($arping){
 
   for ($i=$start;$i<=$end;$i++){
     print "Arping whole subnet... $one.$two.$three.$i\r" if $debug;
-    $arping = `arping -q -f -c 1 -w 1 $one.$two.$three.$i`;
+    $arping = `$bin_arping -I $interface -q -c 1 -w 1 $one.$two.$three.$i`;
   }
 
-print "Arping whole subnet...Done\n" if $debug;
+print "Arping whole subnet...Done              \n" if $debug;
 }
 
+#mDNS and DNS PTR  name discovery
 if (mdns){
   print "mDNS PTR lookup for arp table... " if $debug;
   open(ARP,"arp -an | awk '{ print \$2,\$4}' | sed 's/[\)\(]//g' |");
 
   while (chomp(my $line = <ARP>)){
-    if ($line =~ /^(\d+\.\d+\.\d+\.\d+) (.+)$/){
+    if ($line =~ /^(\d+\.\d+\.\d+\.\d+) (.+)$/ and $line !~ /ff:ff:ff:ff:ff:ff/){
       my $ip = $1;
-      my $ether = $2;
-      $devices{$ip}{'ether'}=$ether;
+      my $mac_address = $2;
+      $mac_address =~ s/^(\d\:.+)/0$1/;
+      $devices{$ip}{'mac_address'}=$mac_address;
       chomp(my $hostname = `dig \@224.0.0.251 -p 5353 +short +time=1 +tries=1 -x $ip`);
-      if ($hostname =~ /timed out/ and $routerptr){
+      if ($hostname =~ / / and $routerptr){
         chomp($hostname = `dig \@$router +short +time=1 +tries=1 -x $ip`);
-      }
-      $hostname =~ s/.local.//g;
-      if ($hostname !~ /timed out/) {
-        $devices{$ip}{'hostname'}=$hostname;
-      }
+      } 
+      if ($hostname =~ / / and $dnsptr){
+        ($dns,$junk)=split(/\,\ /,$dns_servers);
+        chomp($hostname = `dig \@$dns +short +time=1 +tries=1 -x $ip`);
+      } 
+      if ($hostname =~ / /){$hostname='unknown';}
+      $devices{$ip}{'hostname'}=$hostname;
     }
   }
 
@@ -152,7 +190,7 @@ if (mdns){
 if (upnp){
   print "Getting upnp info..." if $debug;
 
-  open(NMAP,"nmap --script=broadcast-upnp-info -e $interface 2>/dev/null|");
+  open(NMAP,"$bin_nmap --script=broadcast-upnp-info -e $interface 2>/dev/null|");
 
   while (chomp(my $line = <NMAP>)){
     if ($line =~ /\|\_*\ +(\d+\.\d+\.\d+\.\d+)/){
@@ -213,39 +251,52 @@ if (upnp){
 if (mdns){
   print "Getting mdns info..." if $debug;
 
-  open(NMAP,"nmap --script=broadcast-dns-service-discovery -e $interface 2>/dev/null|");
+  open(NMAP,"$bin_nmap --script=broadcast-dns-service-discovery -e $interface 2>/dev/null|");
 
   while (chomp(my $line = <NMAP>)){
-    if ($line =~ /\|\_*\ +(\d+\.\d+\.\d+\.\d+)/){
+    if ($line =~ /\|\_*\ +Address=(\d+\.\d+\.\d+\.\d+)/){
       $devices{$1}{'mdns'}=1;
       $current_device=$1;
+      foreach $attrib (keys %tmp_device){
+        if (!$devices{$current_device}{$attrib}){ 
+          $devices{$current_device}{$attrib}=$tmp_device{$attrib};
+        }
+        delete $tmp_device{$attrib};
+      } 
     }
     if ($line =~ /\|\_*\ +model\=(.+)$/){
-      if (!$devices{$current_device}{'model'}){
-        $devices{$current_device}{'model'}=$1;
+      if (!$tmp_device{'model'}){
+        $tmp_device{'model'}=$1;
         if ($1 =~ /macbook/i or /macmini/i or /macpro/i or /imac/i){
-          $devices{$current_device}{'manufacturer'}='Apple, Inc.';
-          $devices{$current_device}{'os'}='OSX';
-          $devices{$current_devices}{'is_workstation'}=1;
+          $tmp_device{'manufacturer'}='Apple, Inc.';
+          $tmp_device{'os'}='osx';
+          $tmp_device{'is_workstation'}=1;
+        }
+        if ($1 =~ /appletv/i){
+          $tmp_device{'manufacturer'}='Apple, Inc.';
+          $tmp_device{'os'}='tvOS';
         }
       }
     }
     if ($line =~ /\|\_*\ +ty\=(.+)$/){
-      if (!$devices{$current_device}{'model'}){
-        $devices{$current_device}{'model'}=$1;
+      if (!$tmp_device{'model'}){
+        $tmp_device{'model'}=$1;
       }
     }
     if ($line =~ /\|\_*\ +serialNumber\=(.+)$/){
-      if (!$devices{$current_device}{'serial_number'}){
-        $devices{$current_device}{'serial_number'}=$1;
+      if (!$tmp_device{'serial_number'}){
+        $tmp_device{'serial_number'}=$1;
       }
     }
     if ($line =~ /\|\_*\ +type\=printer$/i){
-      $devices{$current_device}{'is_printer'}=1;
-      $devices{$current_device}{'is_iot'}=1;
+      $tmp_device{'is_printer'}=1;
+      $tmp_device{'is_iot'}=1;
     }
-    if ($line =~ /\|\_*\ +445\/tcp smb$/i){
-      $devices{$current_device}{'is_fileserver'}=1;
+    if ($line =~ /tcp smb$/i){
+      $tmp_device{'is_fileserver'}=1;
+    }
+    if ($line =~ /roap$/i){
+      $tmp_device{'has_airplay'}=1;
     }
   }
   close(NMAP);
@@ -254,23 +305,23 @@ if (mdns){
 
 ## get list of dropbox clients 
 #if ($dropbox){
-#  open(NMAP,"nmap --script=broadcast-dropbox-listener -e $interface 2>/dev/null|");;
+#  open(NMAP,"$bin_nmap --script=broadcast-dropbox-listener -e $interface 2>/dev/null|");;
 #  close(NMAP);
 #}
 
 ## get list of clients advertising via wsdd
 #if (wsdd){
-#  open(NMAP,"nmap --script=broadcast-wsdd -e $interface 2>/dev/null|");x;
+#  open(NMAP,"$bin_nmap --script=broadcast-wsdd -e $interface 2>/dev/null|");x;
 #  close(NMAP)
 #}
 
 print "\n\n" if $debug;
 foreach my $device (keys %devices){
   if (!$devices{$device}{'manufacturer'} and $maclookup){
-    my $response=`curl -s http://api.macvendors.com/$devices{$device}{'ether'}`;
-    if ($response ne ''){
+    sleep 2;
+    my $response=`$bin_curl -s -H "Accept: text/plain" -H "Authorization: bearer $macvendors_api_key" http://api.macvendors.com/v1/lookup/$devices{$device}{'mac_address'}`;
+    if ($response !~ /error/){
       $devices{$device}{'manufacturer'}=$response;
-      sleep 2;
     }
   }
 
@@ -299,7 +350,7 @@ foreach my $device (keys %devices){
     if ($devices{$device}{'hostname'} =~ /ipad/i or $devices{$device}{'hostname'} =~ /iphone/i){
       $devices{$device}{'name'}=$devices{$device}{'hostname'};
       $devices{$device}{'model'}=$devices{$device}{'hostname'} =~ m/(ipad|iphone)/i;
-      $devices{$device}{'os'}='IOS';
+      $devices{$device}{'os'}='ios';
       $devices{$device}{'is_mobile'}=1;
     }
     if ($devices{$device}{'hostname'} =~ /applewatch/i){
