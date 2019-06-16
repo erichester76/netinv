@@ -13,6 +13,9 @@
 #
 #
 
+#$interface = eth0
+$interface = en0;
+#
 #print progress
 $debug = 1;
 #arping entire subnet enable
@@ -49,7 +52,7 @@ $routerptr = 1;
 #|_  Router: 192.168.1.1
 
 print "Getting DHCP Info..." if $debug;
-open(NMAP,"nmap --script=broadcast-dhcp-discover 2>/dev/null|");
+open(NMAP,"nmap --script=broadcast-dhcp-discover -e $interface 2>/dev/null|");
 
 while (chomp(my $line = <NMAP>)){
   if ($line =~ /\|\_*\ +Server Identifier\: (.+)$/){
@@ -113,7 +116,7 @@ print "Arping whole subnet...Done\n" if $debug;
 
 if (mdns){
   print "mDNS PTR lookup for arp table... " if $debug;
-  open(ARP,"arp -en | awk '{ print \$1, \$3 }' |");
+  open(ARP,"arp -an | awk '{ print \$2,\$4}' | sed 's/[\)\(]//g' |");
 
   while (chomp(my $line = <ARP>)){
     if ($line =~ /^(\d+\.\d+\.\d+\.\d+) (.+)$/){
@@ -149,7 +152,7 @@ if (mdns){
 if (upnp){
   print "Getting upnp info..." if $debug;
 
-  open(NMAP,"nmap --script=broadcast-upnp-info 2>/dev/null|");
+  open(NMAP,"nmap --script=broadcast-upnp-info -e $interface 2>/dev/null|");
 
   while (chomp(my $line = <NMAP>)){
     if ($line =~ /\|\_*\ +(\d+\.\d+\.\d+\.\d+)/){
@@ -210,7 +213,7 @@ if (upnp){
 if (mdns){
   print "Getting mdns info..." if $debug;
 
-  open(NMAP,"nmap --script=broadcast-dns-service-discovery 2>/dev/null|");
+  open(NMAP,"nmap --script=broadcast-dns-service-discovery -e $interface 2>/dev/null|");
 
   while (chomp(my $line = <NMAP>)){
     if ($line =~ /\|\_*\ +(\d+\.\d+\.\d+\.\d+)/){
@@ -261,13 +264,13 @@ if (mdns){
 
 ## get list of dropbox clients 
 #if ($dropbox){
-#  open(NMAP,"nmap --script=broadcast-dropbox-listener 2>/dev/null|");;
+#  open(NMAP,"nmap --script=broadcast-dropbox-listener -e $interface 2>/dev/null|");;
 #  close(NMAP);
 #}
 
 ## get list of clients advertising via wsdd
 #if (wsdd){
-#  open(NMAP,"nmap --script=broadcast-wsdd 2>/dev/null|");x;
+#  open(NMAP,"nmap --script=broadcast-wsdd -e $interface 2>/dev/null|");x;
 #  close(NMAP)
 #}
 
